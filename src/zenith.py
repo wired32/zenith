@@ -5,9 +5,10 @@ import requests_cache
 from retry_requests import retry
 
 import json
-import os, requests
+import os, requests, pathlib
 import logging
 from typing import Optional
+import subprocess
 
 class Zenith:
     def __init__(self, configPath: Optional[str] = None, defInterval: int = 120, level: int = logging.INFO) -> None:
@@ -86,7 +87,7 @@ class Zenith:
         self.config = {
             'interval': defInterval,
             'backgrounds': {
-                'rain': (os.path.join(self.defaultPath, 'images', 'rain.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/rainy.jpg"),
+                'rain': (os.path.join(self.defaultPath, 'images', 'rain.jpg'), "https://github.com/wired32/zenith/raw/refs/heads/main/default/images/rain.jpg"),
                 'clear': (os.path.join(self.defaultPath, 'images', 'clear.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/clear.jpg"),
                 'cloudy': (os.path.join(self.defaultPath, 'images', 'cloudy.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/cloudy.jpg"),
                 'snow': (os.path.join(self.defaultPath, 'images', 'snow.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/snow.jpg"),
@@ -130,7 +131,47 @@ class Zenith:
         self.logger.info(f"Current weather code: {wmo.Value()}")
 
         return (temperature.Value(), humidity.Value(), wmo.Value())
+    
+    def processWMO(self, wmo_code: int) -> str:
+        weather_map = {
+            0: "clear",        # Clear sky
+            1: "cloudy",       # Partly cloudy
+            2: "cloudy",       # Cloudy
+            3: "cloudy",       # Overcast
+            4: "rain",         # Light rain
+            5: "rain",         # Moderate rain
+            6: "rain",         # Heavy rain
+            7: "rain",         # Very heavy rain
+            8: "snow",         # Snow
+            9: "snow",         # Heavy snow
+            10: "snow",        # Blizzard
+            11: "rain",        # Thunderstorm
+            12: "rain"         # Thunderstorm with rain
+        }
+
+        return weather_map.get(wmo_code, "unknown")
+    
+    def changeBackground(self, weather: str) -> None:
+        absolutePath = os.path.abspath(self.config['backgrounds'][weather][0])
+        command = f'gsettings set org.gnome.desktop.background picture-uri "file://{absolutePath}"'
+        self.logger.debug(f"Running command: {command}")
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        if result.stdout: self.logger.debug(f"Subprocess output: {result.stdout}")
+        if result.stderr: self.logger.error(f"Subprocess error: {result.stderr}")
+        self.logger.info(f"Background set to {absolutePath}")
+    
+    def run(self) -> None:
+        temperature, humidity, wmo = self.fetchData()
+
+        self.downloadDefaults()
+
+        weather: str = self.processWMO(wmo)
+
+        if weather == "unknown":
+            self.logger.warning(f"Unknown weather condition: {weather}")
+        else:
+            self.changeBackground('clear')
 
 if __name__ == "__main__":
     zenith = Zenith(level=logging.DEBUG)
-    zenith.fetchData()
+    zenith.run()
