@@ -12,6 +12,10 @@ class Zenith:
     def __init__(self, configPath: str = None, defInterval: int = 120, level = logging.INFO):
         self.URL = "https://api.open-meteo.com/v1/forecast"
         self.logger = logging.getLogger('zenith')
+        self.defaultPath = '../default'
+        
+        if not os.path.exists(self.defaultPath):
+            os.makedirs(self.defaultPath, exist_ok=True)
 
         self.logger.setLevel(level)
 
@@ -42,11 +46,25 @@ class Zenith:
         else:
             self.logger.info("Couldn't find configuration file, setting default configurations.")
             os.makedirs(configPath, exist_ok=True)
-            self.config = {'interval': defInterval}
+            self.config = {
+                'interval': defInterval,
+                'backgrounds': {
+                    'rain': (os.path.join(self.defaultPath, 'images', 'rain.jpg')),
+                }
+            }
             self.logger.debug("Set configuration variable.")
             with open(os.path.join(configPath, 'config.json'), 'w') as f:
                 json.dump(self.config, f)
                 self.logger.debug("Dumped configuration data.")
+
+    # def downloadDefaults(self):
+    #     for background in self.config['backgrounds'].values():
+    #         if not os.path.exists(background):
+    #             self.logger.info(f"Downloading default background: {background}")
+    #             response = requests.get(background)
+    #             with open(background, 'wb') as f:
+    #                 f.write(response.content)
+    #             self.logger.info(f"Downloaded default background: {background}")
 
     def fetchCoordinates(self):
         url = f"https://ipinfo.io/{self.ip}/json"
