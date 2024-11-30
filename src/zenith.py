@@ -7,24 +7,28 @@ from retry_requests import retry
 import json
 import os, requests
 import logging
+from typing import Optional
 
 class Zenith:
-    def __init__(self, configPath: str = None, defInterval: int = 120, level = logging.INFO):
+    def __init__(self, configPath: Optional[str] = None, defInterval: int = 120, level: int = logging.INFO) -> None:
         self.URL = "https://api.open-meteo.com/v1/forecast"
         self.logger = logging.getLogger('zenith')
-        self.defaultPath = '../default'
+        self.defaultPath = 'default'
         
         if not os.path.exists(self.defaultPath):
             os.makedirs(self.defaultPath, exist_ok=True)
 
         self.logger.setLevel(level)
 
-        file_handler = logging.FileHandler(os.path.join(configPath or os.path.expanduser("~/.config/zenith/"), 'zenith.log'))
-        file_handler.setLevel(logging.INFO)
+        log_file = configPath or os.path.expanduser("~/.config/zenith/")
+        if not os.path.exists(log_file):
+            os.makedirs(log_file, exist_ok=True)
+        file_handler = logging.FileHandler(os.path.join(log_file, 'zenith.log'))
+        file_handler.setLevel(level)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
         stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(logging.INFO)
+        stream_handler.setLevel(level)
         stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
         self.logger.addHandler(file_handler)
@@ -34,10 +38,11 @@ class Zenith:
             configPath = os.path.expanduser("~/.config/zenith/")
             self.logger.debug(f"Using default config path: {configPath}")
 
+        self.configPath = configPath
         self._handleConfiguration(configPath, defInterval)
         self._fetchIP()
 
-    def _handleConfiguration(self, configPath: str, defInterval: int):
+    def _handleConfiguration(self, configPath: str, defInterval: int) -> None:
         if os.path.exists(os.path.join(configPath, 'config.json')):
             with open(os.path.join(configPath, 'config.json'), 'r') as f:
                 self.logger.debug("Configuration file found, loading data")
@@ -45,34 +50,30 @@ class Zenith:
                 self.logger.debug(f"Configuration data: {self.config}")
         else:
             self.logger.info("Couldn't find configuration file, setting default configurations.")
-            os.makedirs(configPath, exist_ok=True)
-            self.config = {
-                'interval': defInterval,
-                'backgrounds': {
-                    'rain': (os.path.join(self.defaultPath, 'images', 'rain.jpg')),
-                }
-            }
-            self.logger.debug("Set configuration variable.")
-            with open(os.path.join(configPath, 'config.json'), 'w') as f:
-                json.dump(self.config, f)
-                self.logger.debug("Dumped configuration data.")
+            self._setConfiguration(configPath, defInterval)
 
-    # def downloadDefaults(self):
-    #     for background in self.config['backgrounds'].values():
-    #         if not os.path.exists(background):
-    #             self.logger.info(f"Downloading default background: {background}")
-    #             response = requests.get(background)
-    #             with open(background, 'wb') as f:
-    #                 f.write(response.content)
-    #             self.logger.info(f"Downloaded default background: {background}")
+    def downloadDefaults(self) -> None:
+        os.makedirs(os.path.join(self.defaultPath, 'images'), exist_ok=True)
 
-    def fetchCoordinates(self):
+        if 'backgrounds' not in self.config:
+            self._setConfiguration(self.configPath, 120)
+
+        for background in self.config['backgrounds'].values():
+            if not os.path.exists(background[0]):
+                self.logger.info(f"Downloading background: {background[0]}...")
+                response = requests.get(background[1])
+
+                with open(background[0], 'wb') as f:
+                    f.write(response.content)
+                    self.logger.info(f"Downloaded background: {background[0]} successfully.")
+
+    def fetchCoordinates(self) -> list[float, float]:
         url = f"https://ipinfo.io/{self.ip}/json"
         response = requests.get(url)
         data = response.json()
         return [float(d) for d in data['loc'].split(',')]
 
-    def _fetchIP(self):
+    def _fetchIP(self) -> None:
         ip = requests.get('https://api.ipify.org')
         try:
             ip.raise_for_status()
@@ -80,7 +81,23 @@ class Zenith:
         except Exception as e:
             self.logger.error(f"Failed to fetch IP address: {e}")
 
-    def fetchData(self):
+    def _setConfiguration(self, configPath: str, defInterval: int) -> None:
+        os.makedirs(self.defaultPath, exist_ok=True)
+        self.config = {
+            'interval': defInterval,
+            'backgrounds': {
+                'rain': (os.path.join(self.defaultPath, 'images', 'rain.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/rainy.jpg"),
+                'clear': (os.path.join(self.defaultPath, 'images', 'clear.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/clear.jpg"),
+                'cloudy': (os.path.join(self.defaultPath, 'images', 'cloudy.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/cloudy.jpg"),
+                'snow': (os.path.join(self.defaultPath, 'images', 'snow.jpg'), "https://raw.githubusercontent.com/wired32/zenith/main/default/images/snow.jpg"),
+            }
+        }
+        self.logger.debug("Set configuration variable.")
+        with open(os.path.join(configPath, 'config.json'), 'w') as f:
+            json.dump(self.config, f)
+            self.logger.debug("Dumped configuration data.")
+
+    def fetchData(self) -> tuple[float, float, float]:
         self.logger.debug("Initializing Open Meteo SDK...")
         cache_session = requests_cache.CachedSession('.cache', expire_after=3600)   # Setting cache
         retry_session = retry(cache_session, retries=5, backoff_factor=0.2)         # Setting retries
@@ -112,6 +129,8 @@ class Zenith:
         self.logger.info(f"Current humidity {humidity.Value()}")
         self.logger.info(f"Current weather code: {wmo.Value()}")
 
+        return (temperature.Value(), humidity.Value(), wmo.Value())
+
 if __name__ == "__main__":
-    zenith = Zenith()
+    zenith = Zenith(level=logging.DEBUG)
     zenith.fetchData()
